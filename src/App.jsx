@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Trash2, ArrowLeft, Copy, ChevronRight } from 'lucide-react';
-
-const STORAGE_KEY = 'menu-calc-v1';
+import { Plus, Trash2, ArrowLeft, Copy, ChevronRight, LogOut } from 'lucide-react';
+import { signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
+import { doc, onSnapshot, setDoc } from 'firebase/firestore';
+import { auth, provider, db } from './firebase.js';
 
 const formatRupiah = (num) => {
   if (isNaN(num) || num === null || !isFinite(num)) return '0';
@@ -130,37 +131,53 @@ const STYLES = `
 `;
 
 export default function App() {
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [menus, setMenus] = useState([]);
   const [loaded, setLoaded] = useState(false);
   const [view, setView] = useState('list');
   const [currentId, setCurrentId] = useState(null);
   const [isNewMenu, setIsNewMenu] = useState(false);
   const saveTimeout = useRef(null);
+  const isSyncing = useRef(false);
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          setMenus(parsed);
-          setLoaded(true);
-          return;
-        }
-      }
-    } catch (e) { /* first time */ }
-    setMenus(initialSample());
-    setLoaded(true);
+    return onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      setAuthLoading(false);
+      if (!u) { setMenus([]); setLoaded(false); }
+    });
   }, []);
 
   useEffect(() => {
-    if (!loaded) return;
+    if (!user) return;
+    const ref = doc(db, 'users', user.uid);
+    const unsub = onSnapshot(ref, (snap) => {
+      isSyncing.current = true;
+      if (snap.exists()) {
+        const data = snap.data();
+        if (Array.isArray(data.menus)) {
+          setMenus(data.menus);
+        } else {
+          setMenus(initialSample());
+        }
+      } else {
+        setMenus(initialSample());
+      }
+      setLoaded(true);
+      setTimeout(() => { isSyncing.current = false; }, 0);
+    });
+    return unsub;
+  }, [user]);
+
+  useEffect(() => {
+    if (!loaded || !user || isSyncing.current) return;
     if (saveTimeout.current) clearTimeout(saveTimeout.current);
     saveTimeout.current = setTimeout(() => {
-      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(menus)); } catch (e) {}
-    }, 400);
+      setDoc(doc(db, 'users', user.uid), { menus }).catch(() => {});
+    }, 600);
     return () => { if (saveTimeout.current) clearTimeout(saveTimeout.current); };
-  }, [menus, loaded]);
+  }, [menus, loaded, user]);
 
   const currentMenu = menus.find(m => m.id === currentId);
 
@@ -204,13 +221,22 @@ export default function App() {
     setView('edit');
   };
 
+  const handleLogin = () => signInWithPopup(auth, provider).catch(() => {});
+  const handleLogout = () => { signOut(auth); setView('list'); setCurrentId(null); };
+
   return (
     <>
       <style>{STYLES}</style>
       <div className="ff-body bg-paper text-ink min-h-screen">
-        {!loaded ? (
+        {authLoading ? (
           <div className="min-h-screen flex items-center justify-center">
             <p className="text-ink-50">Memuat...</p>
+          </div>
+        ) : !user ? (
+          <LoginScreen onLogin={handleLogin} />
+        ) : !loaded ? (
+          <div className="min-h-screen flex items-center justify-center">
+            <p className="text-ink-50">Sinkronisasi data...</p>
           </div>
         ) : view === 'edit' && currentMenu ? (
           <MenuEditor
@@ -223,10 +249,12 @@ export default function App() {
         ) : (
           <MenuList
             menus={menus}
+            user={user}
             onAdd={addNewMenu}
             onEdit={(id) => { setCurrentId(id); setIsNewMenu(false); setView('edit'); }}
             onDelete={deleteMenu}
             onDuplicate={duplicateMenu}
+            onLogout={handleLogout}
           />
         )}
       </div>
@@ -234,13 +262,45 @@ export default function App() {
   );
 }
 
-function MenuList({ menus, onAdd, onEdit, onDelete, onDuplicate }) {
+function LoginScreen({ onLogin }) {
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center px-6">
+      <div className="text-xs uppercase tracking-widest text-ink-50 mb-3">Untuk Shopee · Grab · Gojek</div>
+      <h1 className="ff-display-italic text-4xl text-ink mb-2">Nyambox</h1>
+      <p className="text-ink-50 text-sm mb-10">Kalkulator harga menu, tersimpan di cloud</p>
+      <button
+        onClick={onLogin}
+        className="bg-ink text-cream font-semibold py-4 px-8 rounded-2xl flex items-center gap-3 btn-press shadow-lg shadow-ink/20"
+      >
+        <svg className="w-5 h-5" viewBox="0 0 24 24">
+          <path fill="#EA4335" d="M5.266 9.765A7.077 7.077 0 0 1 12 4.909c1.69 0 3.218.6 4.418 1.582L19.91 3C17.782 1.145 15.055 0 12 0 7.27 0 3.198 2.698 1.24 6.65l4.026 3.115Z"/>
+          <path fill="#34A853" d="M16.04 18.013c-1.09.703-2.474 1.078-4.04 1.078a7.077 7.077 0 0 1-6.723-4.823l-4.04 3.067A11.965 11.965 0 0 0 12 24c2.933 0 5.735-1.043 7.834-3l-3.793-2.987Z"/>
+          <path fill="#4A90E2" d="M19.834 21c2.195-2.048 3.62-5.096 3.62-9 0-.71-.109-1.473-.272-2.182H12v4.637h6.436c-.317 1.559-1.17 2.766-2.395 3.558L19.834 21Z"/>
+          <path fill="#FBBC05" d="M5.277 14.268A7.12 7.12 0 0 1 4.909 12c0-.782.125-1.533.357-2.235L1.24 6.65A11.934 11.934 0 0 0 0 12c0 1.92.445 3.73 1.237 5.335l4.04-3.067Z"/>
+        </svg>
+        Masuk dengan Google
+      </button>
+    </div>
+  );
+}
+
+function MenuList({ menus, user, onAdd, onEdit, onDelete, onDuplicate, onLogout }) {
   return (
     <div className="min-h-screen">
       <header className="bg-paper border-b border-ink-15 sticky top-0 z-10">
-        <div className="max-w-2xl mx-auto px-5 py-5">
-          <div className="text-xs uppercase tracking-widest text-ink-50 mb-1">Untuk Shopee · Grab · Gojek</div>
-          <h1 className="ff-display-italic text-3xl text-ink">Kalkulator Harga Menu</h1>
+        <div className="max-w-2xl mx-auto px-5 py-5 flex items-start justify-between gap-3">
+          <div>
+            <div className="text-xs uppercase tracking-widest text-ink-50 mb-1">Untuk Shopee · Grab · Gojek</div>
+            <h1 className="ff-display-italic text-3xl text-ink">Kalkulator Harga Menu</h1>
+          </div>
+          <button
+            onClick={onLogout}
+            className="flex items-center gap-1.5 text-ink-50 text-xs mt-1 px-2 py-1.5 rounded-lg btn-press hover:bg-paper-warm"
+            title={user?.displayName}
+          >
+            {user?.photoURL && <img src={user.photoURL} className="w-6 h-6 rounded-full" referrerPolicy="no-referrer" />}
+            <LogOut className="w-3.5 h-3.5" />
+          </button>
         </div>
       </header>
 
