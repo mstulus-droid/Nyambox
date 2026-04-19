@@ -419,6 +419,7 @@ function LoginScreen({ onLogin }) {
 }
 
 function MenuList({ menus, user, workspaceId, onAdd, onEdit, onDelete, onDuplicate, onLogout, onLeave }) {
+  const [showInfo, setShowInfo] = useState(false);
   const [copied, setCopied] = useState(false);
 
   const copyCode = () => {
@@ -431,43 +432,70 @@ function MenuList({ menus, user, workspaceId, onAdd, onEdit, onDelete, onDuplica
   return (
     <div className="min-h-screen">
       <header className="bg-paper border-b border-ink-15 sticky top-0 z-10">
-        <div className="max-w-2xl mx-auto px-5 pt-5 pb-3">
-          <div className="flex items-start justify-between gap-3 mb-3">
-            <div>
-              <div className="text-xs uppercase tracking-widest text-ink-50 mb-1">Untuk Shopee · Grab · Gojek</div>
-              <h1 className="ff-display-italic text-3xl text-ink">Kalkulator Harga Menu</h1>
-            </div>
-            <button
-              onClick={onLogout}
-              className="flex items-center gap-1.5 text-ink-50 text-xs mt-1 px-2 py-1.5 rounded-lg btn-press hover:bg-paper-warm"
-              title={'Keluar — ' + user?.displayName}
-            >
-              {user?.photoURL && <img src={user.photoURL} className="w-6 h-6 rounded-full" referrerPolicy="no-referrer" />}
-              <LogOut className="w-3.5 h-3.5" />
-            </button>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-2 bg-surface border border-ink-15 rounded-xl px-3 py-2 flex-1">
-              <span className="text-[10px] uppercase tracking-widest text-ink-50">Kode workspace</span>
-              <span className="ff-display text-sm font-medium text-ink tracking-widest">{workspaceId}</span>
-            </div>
-            <button
-              onClick={copyCode}
-              className="bg-surface border border-ink-15 rounded-xl px-3 py-2 text-xs text-ink-70 font-medium btn-press hover:bg-paper-warm flex items-center gap-1.5"
-            >
-              <Copy className="w-3.5 h-3.5" />
-              {copied ? 'Disalin!' : 'Salin'}
-            </button>
-            <button
-              onClick={() => { if (window.confirm('Keluar dari workspace ini?')) onLeave(); }}
-              className="text-ink-30 hover:text-accent p-2 rounded-xl btn-press"
-              title="Keluar workspace"
-            >
-              <ArrowLeft className="w-4 h-4" />
-            </button>
-          </div>
+        <div className="max-w-2xl mx-auto px-5 py-5 text-center">
+          <button onClick={() => setShowInfo(true)} className="btn-press inline-block">
+            <h1 className="ff-display-italic text-3xl text-ink">Kalkulator Harga Menu</h1>
+            <div className="text-xs uppercase tracking-widest text-ink-50 mt-0.5">Nyambox</div>
+          </button>
         </div>
       </header>
+
+      {showInfo && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center"
+          style={{background: 'rgba(30,26,21,0.4)'}}
+          onClick={() => setShowInfo(false)}
+        >
+          <div
+            className="bg-surface w-full max-w-2xl rounded-t-3xl p-6 pb-10 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-10 h-1 bg-ink-15 rounded-full mx-auto mb-5"></div>
+
+            <div className="flex items-center gap-3 pb-4 border-b border-ink-10">
+              {user?.photoURL && <img src={user.photoURL} className="w-10 h-10 rounded-full" referrerPolicy="no-referrer" />}
+              <div>
+                <div className="font-semibold text-ink">{user?.displayName}</div>
+                <div className="text-xs text-ink-50">{user?.email}</div>
+              </div>
+            </div>
+
+            <div>
+              <div className="text-[11px] uppercase tracking-widest text-ink-50 mb-2">Kode Workspace</div>
+              <div className="flex items-center gap-2">
+                <div className="flex-1 bg-cream border border-ink-15 rounded-xl px-4 py-3">
+                  <span className="ff-display text-xl tracking-widest text-ink font-medium">{workspaceId}</span>
+                </div>
+                <button
+                  onClick={copyCode}
+                  className="bg-ink text-cream font-semibold px-4 py-3 rounded-xl btn-press flex items-center gap-2 text-sm"
+                >
+                  <Copy className="w-4 h-4" />
+                  {copied ? 'Disalin!' : 'Salin'}
+                </button>
+              </div>
+              <p className="text-xs text-ink-50 mt-2">Bagikan kode ini agar orang lain bisa bergabung ke workspace kamu.</p>
+            </div>
+
+            <div className="space-y-2 pt-2">
+              <button
+                onClick={() => { setShowInfo(false); if (window.confirm('Keluar dari workspace ini?')) onLeave(); }}
+                className="w-full bg-accent-soft text-accent font-semibold py-3.5 rounded-2xl btn-press text-sm"
+              >
+                Keluar Workspace
+              </button>
+              <button
+                onClick={() => { setShowInfo(false); onLogout(); }}
+                className="w-full bg-paper-warm text-ink-70 font-semibold py-3.5 rounded-2xl btn-press text-sm flex items-center justify-center gap-2"
+              >
+                <LogOut className="w-4 h-4" />
+                Keluar Akun
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
 
       <main className="max-w-2xl mx-auto px-5 py-6">
         {menus.length === 0 ? (
