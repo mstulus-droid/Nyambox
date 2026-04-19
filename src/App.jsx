@@ -15,6 +15,10 @@ const roundUpTo = (num, to) => {
 
 const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 
+const toTitleCase = (str) => str.replace(/(^|\s)\S/g, (c) => c.toUpperCase());
+
+const formatPriceInput = (val) => val ? Number(val).toLocaleString('id-ID') : '';
+
 const initialSample = () => [{
   id: newId(),
   name: 'Nasi Ayam Goreng',
@@ -130,6 +134,7 @@ export default function App() {
   const [loaded, setLoaded] = useState(false);
   const [view, setView] = useState('list');
   const [currentId, setCurrentId] = useState(null);
+  const [isNewMenu, setIsNewMenu] = useState(false);
   const saveTimeout = useRef(null);
 
   useEffect(() => {
@@ -173,6 +178,7 @@ export default function App() {
     }
     setMenus(prev => [...prev, m]);
     setCurrentId(m.id);
+    setIsNewMenu(true);
     setView('edit');
   };
 
@@ -212,12 +218,13 @@ export default function App() {
             onChange={updateCurrent}
             onBack={() => { setCurrentId(null); setView('list'); }}
             onDelete={() => deleteMenu(currentMenu.id)}
+            autoFocusName={isNewMenu}
           />
         ) : (
           <MenuList
             menus={menus}
             onAdd={addNewMenu}
-            onEdit={(id) => { setCurrentId(id); setView('edit'); }}
+            onEdit={(id) => { setCurrentId(id); setIsNewMenu(false); setView('edit'); }}
             onDelete={deleteMenu}
             onDuplicate={duplicateMenu}
           />
@@ -327,8 +334,14 @@ function MenuList({ menus, onAdd, onEdit, onDelete, onDuplicate }) {
   );
 }
 
-function MenuEditor({ menu, onChange, onBack, onDelete }) {
+function MenuEditor({ menu, onChange, onBack, onDelete, autoFocusName }) {
   const calc = calculateMenu(menu);
+  const nameInputRef = useRef(null);
+  const [focusIngId, setFocusIngId] = useState(null);
+
+  useEffect(() => {
+    if (autoFocusName) nameInputRef.current?.focus();
+  }, [autoFocusName]);
 
   const updateField = (field, value) => onChange(m => ({ ...m, [field]: value }));
 
@@ -342,10 +355,12 @@ function MenuEditor({ menu, onChange, onBack, onDelete }) {
   };
 
   const addIngredient = () => {
+    const newIng = { id: newId(), name: '', price: '', portions: '' };
     onChange(m => ({
       ...m,
-      ingredients: [...m.ingredients, { id: newId(), name: '', price: '', portions: '' }],
+      ingredients: [...m.ingredients, newIng],
     }));
+    setFocusIngId(newIng.id);
   };
 
   const removeIngredient = (ingId) => {
@@ -378,9 +393,10 @@ function MenuEditor({ menu, onChange, onBack, onDelete }) {
         <div className="bg-surface rounded-2xl p-5 border border-ink-15">
           <label className="block text-[11px] font-semibold text-ink-50 mb-1.5 uppercase tracking-widest">Nama Menu</label>
           <input
+            ref={nameInputRef}
             type="text"
             value={menu.name}
-            onChange={(e) => updateField('name', e.target.value)}
+            onChange={(e) => updateField('name', toTitleCase(e.target.value))}
             placeholder="Contoh: Nasi Ayam Goreng"
             className="ff-display w-full text-2xl text-ink outline-none bg-transparent placeholder:text-ink-30 placeholder:italic"
           />
@@ -406,6 +422,12 @@ function MenuEditor({ menu, onChange, onBack, onDelete }) {
                       onChange={(e) => updateIngredient(ing.id, 'name', e.target.value)}
                       placeholder="Nama bahan"
                       className="flex-1 font-medium text-ink outline-none bg-transparent placeholder:text-ink-30"
+                      ref={(el) => {
+                        if (el && focusIngId === ing.id) {
+                          el.focus();
+                          setFocusIngId(null);
+                        }
+                      }}
                     />
                     {menu.ingredients.length > 1 && (
                       <button
@@ -423,10 +445,10 @@ function MenuEditor({ menu, onChange, onBack, onDelete }) {
                       <div className="flex items-center bg-cream rounded-xl px-3 py-2.5 border border-ink-15 focus-within:border-accent transition-colors">
                         <span className="text-ink-50 text-sm mr-1.5">Rp</span>
                         <input
-                          type="number"
+                          type="text"
                           inputMode="numeric"
-                          value={ing.price}
-                          onChange={(e) => updateIngredient(ing.id, 'price', e.target.value)}
+                          value={formatPriceInput(ing.price)}
+                          onChange={(e) => updateIngredient(ing.id, 'price', e.target.value.replace(/[^0-9]/g, ''))}
                           placeholder="0"
                           className="w-full bg-transparent outline-none text-ink tabular font-medium"
                         />
