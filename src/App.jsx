@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Plus, Trash2, ArrowLeft, Copy, ChevronRight, LogOut } from 'lucide-react';
 import { signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
-import { doc, onSnapshot, setDoc } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc, getDoc, updateDoc, arrayUnion } from 'firebase/firestore';
 import { auth, provider, db } from './firebase.js';
 
 const formatRupiah = (num) => {
@@ -130,9 +130,16 @@ const STYLES = `
   }
 `;
 
+const generateCode = () => {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  return Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+};
+
 export default function App() {
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [workspaceId, setWorkspaceId] = useState(null);
+  const [workspaceChecked, setWorkspaceChecked] = useState(false);
   const [menus, setMenus] = useState([]);
   const [loaded, setLoaded] = useState(false);
   const [view, setView] = useState('list');
@@ -141,26 +148,39 @@ export default function App() {
   const saveTimeout = useRef(null);
   const isSyncing = useRef(false);
 
+  // Auth listener
   useEffect(() => {
     return onAuthStateChanged(auth, (u) => {
       setUser(u);
       setAuthLoading(false);
-      if (!u) { setMenus([]); setLoaded(false); }
+      if (!u) {
+        setMenus([]);
+        setLoaded(false);
+        setWorkspaceId(null);
+        setWorkspaceChecked(false);
+      }
     });
   }, []);
 
+  // Cek workspace user
   useEffect(() => {
     if (!user) return;
-    const ref = doc(db, 'users', user.uid);
+    getDoc(doc(db, 'users', user.uid)).then((snap) => {
+      if (snap.exists() && snap.data().workspaceId) {
+        setWorkspaceId(snap.data().workspaceId);
+      }
+      setWorkspaceChecked(true);
+    });
+  }, [user]);
+
+  // Subscribe ke workspace data
+  useEffect(() => {
+    if (!workspaceId) return;
+    const ref = doc(db, 'workspaces', workspaceId);
     const unsub = onSnapshot(ref, (snap) => {
       isSyncing.current = true;
-      if (snap.exists()) {
-        const data = snap.data();
-        if (Array.isArray(data.menus)) {
-          setMenus(data.menus);
-        } else {
-          setMenus(initialSample());
-        }
+      if (snap.exists() && Array.isArray(snap.data().menus)) {
+        setMenus(snap.data().menus);
       } else {
         setMenus(initialSample());
       }
@@ -168,16 +188,48 @@ export default function App() {
       setTimeout(() => { isSyncing.current = false; }, 0);
     });
     return unsub;
-  }, [user]);
+  }, [workspaceId]);
 
+  // Simpan ke workspace
   useEffect(() => {
-    if (!loaded || !user || isSyncing.current) return;
+    if (!loaded || !workspaceId || isSyncing.current) return;
     if (saveTimeout.current) clearTimeout(saveTimeout.current);
     saveTimeout.current = setTimeout(() => {
-      setDoc(doc(db, 'users', user.uid), { menus }).catch(() => {});
+      setDoc(doc(db, 'workspaces', workspaceId), { menus }, { merge: true }).catch(() => {});
     }, 600);
     return () => { if (saveTimeout.current) clearTimeout(saveTimeout.current); };
-  }, [menus, loaded, user]);
+  }, [menus, loaded, workspaceId]);
+
+  const handleCreateWorkspace = async () => {
+    const code = generateCode();
+    await setDoc(doc(db, 'workspaces', code), {
+      owner: user.uid,
+      members: [user.uid],
+      menus: initialSample(),
+    });
+    await setDoc(doc(db, 'users', user.uid), { workspaceId: code }, { merge: true });
+    setWorkspaceId(code);
+  };
+
+  const handleJoinWorkspace = async (code) => {
+    const ref = doc(db, 'workspaces', code);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) return 'not-found';
+    await updateDoc(ref, { members: arrayUnion(user.uid) });
+    await setDoc(doc(db, 'users', user.uid), { workspaceId: code }, { merge: true });
+    setWorkspaceId(code);
+    return 'ok';
+  };
+
+  const handleLeaveWorkspace = async () => {
+    await setDoc(doc(db, 'users', user.uid), { workspaceId: null }, { merge: true });
+    setWorkspaceId(null);
+    setWorkspaceChecked(true);
+    setLoaded(false);
+    setMenus([]);
+    setView('list');
+    setCurrentId(null);
+  };
 
   const currentMenu = menus.find(m => m.id === currentId);
 
@@ -201,10 +253,7 @@ export default function App() {
 
   const deleteMenu = (id) => {
     setMenus(prev => prev.filter(m => m.id !== id));
-    if (id === currentId) {
-      setCurrentId(null);
-      setView('list');
-    }
+    if (id === currentId) { setCurrentId(null); setView('list'); }
   };
 
   const duplicateMenu = (id) => {
@@ -222,18 +271,25 @@ export default function App() {
   };
 
   const handleLogin = () => signInWithPopup(auth, provider).catch(() => {});
-  const handleLogout = () => { signOut(auth); setView('list'); setCurrentId(null); };
+  const handleLogout = () => { signOut(auth); };
 
   return (
     <>
       <style>{STYLES}</style>
       <div className="ff-body bg-paper text-ink min-h-screen">
-        {authLoading ? (
+        {authLoading || (user && !workspaceChecked) ? (
           <div className="min-h-screen flex items-center justify-center">
             <p className="text-ink-50">Memuat...</p>
           </div>
         ) : !user ? (
           <LoginScreen onLogin={handleLogin} />
+        ) : !workspaceId ? (
+          <WorkspaceSetup
+            user={user}
+            onCreate={handleCreateWorkspace}
+            onJoin={handleJoinWorkspace}
+            onLogout={handleLogout}
+          />
         ) : !loaded ? (
           <div className="min-h-screen flex items-center justify-center">
             <p className="text-ink-50">Sinkronisasi data...</p>
@@ -250,15 +306,86 @@ export default function App() {
           <MenuList
             menus={menus}
             user={user}
+            workspaceId={workspaceId}
             onAdd={addNewMenu}
             onEdit={(id) => { setCurrentId(id); setIsNewMenu(false); setView('edit'); }}
             onDelete={deleteMenu}
             onDuplicate={duplicateMenu}
             onLogout={handleLogout}
+            onLeave={handleLeaveWorkspace}
           />
         )}
       </div>
     </>
+  );
+}
+
+function WorkspaceSetup({ user, onCreate, onJoin, onLogout }) {
+  const [mode, setMode] = useState(null); // null | 'join'
+  const [code, setCode] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleJoin = async () => {
+    const trimmed = code.trim().toUpperCase();
+    if (trimmed.length < 4) { setError('Kode tidak valid'); return; }
+    setLoading(true);
+    setError('');
+    const result = await onJoin(trimmed);
+    if (result === 'not-found') {
+      setError('Kode workspace tidak ditemukan');
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center px-6">
+      <div className="text-xs uppercase tracking-widest text-ink-50 mb-2">Halo, {user.displayName?.split(' ')[0]}</div>
+      <h1 className="ff-display-italic text-3xl text-ink mb-8">Pilih Workspace</h1>
+
+      {mode === null && (
+        <div className="w-full max-w-xs space-y-3">
+          <button
+            onClick={async () => { setLoading(true); await onCreate(); setLoading(false); }}
+            disabled={loading}
+            className="w-full bg-ink text-cream font-semibold py-4 rounded-2xl btn-press disabled:opacity-50"
+          >
+            {loading ? 'Membuat...' : 'Buat Workspace Baru'}
+          </button>
+          <button
+            onClick={() => setMode('join')}
+            className="w-full bg-surface border border-ink-15 text-ink font-semibold py-4 rounded-2xl btn-press"
+          >
+            Gabung Workspace
+          </button>
+          <button onClick={onLogout} className="w-full text-ink-50 text-sm py-2">Keluar</button>
+        </div>
+      )}
+
+      {mode === 'join' && (
+        <div className="w-full max-w-xs space-y-3">
+          <p className="text-sm text-ink-50 text-center mb-2">Masukkan kode 6 karakter dari pemilik workspace</p>
+          <input
+            type="text"
+            value={code}
+            onChange={(e) => { setCode(e.target.value.toUpperCase()); setError(''); }}
+            placeholder="CONTOH: ABC123"
+            maxLength={6}
+            autoFocus
+            className="w-full bg-surface border border-ink-15 rounded-2xl px-4 py-4 text-center ff-display text-2xl tracking-widest text-ink outline-none focus:border-accent"
+          />
+          {error && <p className="text-accent text-sm text-center">{error}</p>}
+          <button
+            onClick={handleJoin}
+            disabled={loading}
+            className="w-full bg-ink text-cream font-semibold py-4 rounded-2xl btn-press disabled:opacity-50"
+          >
+            {loading ? 'Mencari...' : 'Gabung'}
+          </button>
+          <button onClick={() => { setMode(null); setError(''); setCode(''); }} className="w-full text-ink-50 text-sm py-2">Kembali</button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -284,23 +411,54 @@ function LoginScreen({ onLogin }) {
   );
 }
 
-function MenuList({ menus, user, onAdd, onEdit, onDelete, onDuplicate, onLogout }) {
+function MenuList({ menus, user, workspaceId, onAdd, onEdit, onDelete, onDuplicate, onLogout, onLeave }) {
+  const [copied, setCopied] = useState(false);
+
+  const copyCode = () => {
+    navigator.clipboard.writeText(workspaceId).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
   return (
     <div className="min-h-screen">
       <header className="bg-paper border-b border-ink-15 sticky top-0 z-10">
-        <div className="max-w-2xl mx-auto px-5 py-5 flex items-start justify-between gap-3">
-          <div>
-            <div className="text-xs uppercase tracking-widest text-ink-50 mb-1">Untuk Shopee · Grab · Gojek</div>
-            <h1 className="ff-display-italic text-3xl text-ink">Kalkulator Harga Menu</h1>
+        <div className="max-w-2xl mx-auto px-5 pt-5 pb-3">
+          <div className="flex items-start justify-between gap-3 mb-3">
+            <div>
+              <div className="text-xs uppercase tracking-widest text-ink-50 mb-1">Untuk Shopee · Grab · Gojek</div>
+              <h1 className="ff-display-italic text-3xl text-ink">Kalkulator Harga Menu</h1>
+            </div>
+            <button
+              onClick={onLogout}
+              className="flex items-center gap-1.5 text-ink-50 text-xs mt-1 px-2 py-1.5 rounded-lg btn-press hover:bg-paper-warm"
+              title={'Keluar — ' + user?.displayName}
+            >
+              {user?.photoURL && <img src={user.photoURL} className="w-6 h-6 rounded-full" referrerPolicy="no-referrer" />}
+              <LogOut className="w-3.5 h-3.5" />
+            </button>
           </div>
-          <button
-            onClick={onLogout}
-            className="flex items-center gap-1.5 text-ink-50 text-xs mt-1 px-2 py-1.5 rounded-lg btn-press hover:bg-paper-warm"
-            title={user?.displayName}
-          >
-            {user?.photoURL && <img src={user.photoURL} className="w-6 h-6 rounded-full" referrerPolicy="no-referrer" />}
-            <LogOut className="w-3.5 h-3.5" />
-          </button>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 bg-surface border border-ink-15 rounded-xl px-3 py-2 flex-1">
+              <span className="text-[10px] uppercase tracking-widest text-ink-50">Kode workspace</span>
+              <span className="ff-display text-sm font-medium text-ink tracking-widest">{workspaceId}</span>
+            </div>
+            <button
+              onClick={copyCode}
+              className="bg-surface border border-ink-15 rounded-xl px-3 py-2 text-xs text-ink-70 font-medium btn-press hover:bg-paper-warm flex items-center gap-1.5"
+            >
+              <Copy className="w-3.5 h-3.5" />
+              {copied ? 'Disalin!' : 'Salin'}
+            </button>
+            <button
+              onClick={() => { if (window.confirm('Keluar dari workspace ini?')) onLeave(); }}
+              className="text-ink-30 hover:text-accent p-2 rounded-xl btn-press"
+              title="Keluar workspace"
+            >
+              <ArrowLeft className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       </header>
 
