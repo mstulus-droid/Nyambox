@@ -212,13 +212,18 @@ export default function App() {
   };
 
   const handleJoinWorkspace = async (code) => {
-    const ref = doc(db, 'workspaces', code);
-    const snap = await getDoc(ref);
-    if (!snap.exists()) return 'not-found';
-    await updateDoc(ref, { members: arrayUnion(user.uid) });
-    await setDoc(doc(db, 'users', user.uid), { workspaceId: code }, { merge: true });
-    setWorkspaceId(code);
-    return 'ok';
+    try {
+      const ref = doc(db, 'workspaces', code);
+      const snap = await getDoc(ref);
+      if (!snap.exists()) return 'not-found';
+      await updateDoc(ref, { members: arrayUnion(user.uid) });
+      await setDoc(doc(db, 'users', user.uid), { workspaceId: code }, { merge: true });
+      setWorkspaceId(code);
+      return 'ok';
+    } catch (e) {
+      console.error(e);
+      return 'error';
+    }
   };
 
   const handleLeaveWorkspace = async () => {
@@ -334,6 +339,8 @@ function WorkspaceSetup({ user, onCreate, onJoin, onLogout }) {
     const result = await onJoin(trimmed);
     if (result === 'not-found') {
       setError('Kode workspace tidak ditemukan');
+    } else if (result === 'error') {
+      setError('Gagal bergabung, coba lagi');
     }
     setLoading(false);
   };
